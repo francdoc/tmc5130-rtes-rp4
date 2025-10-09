@@ -221,8 +221,8 @@ void *hao(void *arg) {
         { .fd = (int)mq_bao_hao,  .events = POLLIN }
     };
 
-    int last_T = 0, last_P = 0, last_H = 0;
-
+    int last_RESET = 0, last_DRV_ERR = 0, last_UV_CP = 0;
+    
     while (1) {
         if (poll(pfds, 3, -1) == -1) { perror("[HAO]: poll"); break; }
 
@@ -257,7 +257,7 @@ void *hao(void *arg) {
                 fflush(stdout);
                 char resp[MSG_SIZE];
                 snprintf(resp, MSG_SIZE, STATUS_RES ":%d T=%d P=%d H=%d",
-                         last_bao_value, last_T, last_P, last_H);
+                    last_bao_value, last_RESET, last_DRV_ERR, last_UV_CP); // keep API labels
                 mq_send(mq_hao_opao, resp, strlen(resp)+1, 0);
             }
         }
@@ -277,11 +277,10 @@ void *hao(void *arg) {
                 unsigned char *raw = (unsigned char*)(buf + strlen(hdr) + 1);
                 int cnt = atoi(hdr + strlen(POLL_RES) + 1);
 
-                decode_tmc5130_readout(raw, cnt, &last_T, &last_P, &last_H);
+                decode_tmc5130_readout(raw, cnt, &last_RESET, &last_DRV_ERR, &last_UV_CP);
 
                 clock_gettime(CLOCK_MONOTONIC, &now);
-                printf("[HAO]: [%5ld.%09ld] From BAO: count=%d, GSTAT bits => RESET=%d DRV_ERR=%d UV_CP=%d\n",
-                       now.tv_sec, now.tv_nsec, cnt, last_T, last_P, last_H);
+                printf("[HAO]: [...] GSTAT bits => RESET=%d DRV_ERR=%d UV_CP=%d\n", last_RESET, last_DRV_ERR, last_UV_CP);
                 fflush(stdout);
             }
         }
