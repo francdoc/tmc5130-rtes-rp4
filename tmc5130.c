@@ -20,8 +20,20 @@ static uint32_t spi_speed_hz = 1000000; /* 1 MHz */
 static uint8_t  spi_bits      = 8;
 static uint8_t  spi_mode      = SPI_MODE_3; /* TMC5130: mode 3 */
 
-/* TMC5130 register we poll */
-#define TMC5130_GSTAT  0x01
+/* -------- SPI status byte (bits 39..32 of any SPI reply) -------- */
+#define SPI_STATUS_RESET_FLAG   (1u << 0)
+#define SPI_STATUS_DRIVER_ERR   (1u << 1)
+#define SPI_STATUS_SG2          (1u << 2)
+#define SPI_STATUS_STANDSTILL   (1u << 3)
+#define SPI_STATUS_RSVD4        (1u << 4)
+#define SPI_STATUS_RSVD5        (1u << 5)
+#define SPI_STATUS_RSVD6        (1u << 6)
+#define SPI_STATUS_RSVD7        (1u << 7)
+
+/* TMC5130 register address for GSTAT (needed by HAO when building the read) */
+#ifndef TMC5130_GSTAT
+#define TMC5130_GSTAT 0x01
+#endif
 
 int tmc5130init(int bus, int cs);
 
@@ -50,60 +62,55 @@ static mqd_t mq_bao_hao  = (mqd_t)-1;
 static int hao_counter     = 0;
 static int last_bao_value  = 0;
 
-void decode_tmc5130_readout(unsigned char *raw, int cnt, int *outT, int *outP, int *outH)
+void decode_tmc5130_readout(unsigned char *raw, int cnt, int *last_RESET, int *last_DRV_ERR, int *last_UV_CP)
 {
-    (void)cnt;
+    (void)cnt; /* BAO counter, not a length */
 
-    /* Print only on change to keep logs clean */
-    static uint32_t prev_gstat = 0xFFFFFFFF; /* force one initial print */
-    uint32_t gstat = 0;
-    int valid = 0;
+    /* Expect exactly 5 SPI bytes: [0]=SPI_STATUS, [1..4]=GSTAT */
+    static uint8_t  prev_spi_status = 0xFF;       /* force first print */
+    static uint32_t prev_gstat      = 0xFFFFFFFF; /* force first print */
 
-    /* SPI 5B reply: [0]=addr(0x01), [1..4]=data */
-    if (raw[0] == TMC5130_GSTAT) {
-        gstat = ((uint32_t)raw[1] << 24) |
-                ((uint32_t)raw[2] << 16) |
-                ((uint32_t)raw[3] <<  8) |
-                ((uint32_t)raw[4] <<  0);
-        valid = 1;
-    }
-    /* UART 8B reply: [0]=0x05, [1]=0xFF, [2]=addr, [3..6]=data, [7]=CRC (not verified here) */
-    else if (raw[0] == 0x05 && (raw[2] & 0x7F) == TMC5130_GSTAT) {
-        gstat = ((uint32_t)raw[3] << 24) |
-                ((uint32_t)raw[4] << 16) |
-                ((uint32_t)raw[5] <<  8) |
-                ((uint32_t)raw[6] <<  0);
-        /* Light sanity checks for visibility (no CRC calc here) */
-        if (raw[1] != 0xFF) {
-            fprintf(stderr, "[GSTAT][UART] WARN: master addr=0x%02X (expected 0xFF)\n", raw[1]);
-        }
-        if ((raw[2] & 0x7F) != TMC5130_GSTAT) {
-            fprintf(stderr, "[GSTAT][UART] WARN: addr echo=0x%02X (expected 0x01)\n", raw[2] & 0x7F);
-        }
-        valid = 1;
-    }
-    else {
-        /* Unexpected payload: neither SPI nor UART GSTAT */
-        fprintf(stderr,
-                "[GSTAT] ERROR: unexpected payload header 0x%02X (expected 0x01 for SPI, or 0x05 for UART)\n",
-                raw[0]);
-        *outT = *outP = *outH = -1;
-        return;
+    const uint8_t spi_status = raw[0];
+
+    /* 32‑bit GSTAT value is big‑endian in bytes 1..4 */
+    const uint32_t gstat =
+        ((uint32_t)raw[1] << 24) |
+        ((uint32_t)raw[2] << 16) |
+        ((uint32_t)raw[3] <<  8) |
+        ((uint32_t)raw[4] <<  0);
+
+    /* Log SPI_STATUS (only when it changes) */
+    if (spi_status != prev_spi_status) {
+        printf("[DIAG] SPI_STATUS=0x%02X  "
+               "RSVD7=%d RSVD6=%d RSVD5=%d RSVD4=%d  "
+               "STST=%d SG2=%d DRV_ERR=%d RESET=%d\n",
+               spi_status,
+               !!(spi_status & SPI_STATUS_RSVD7),
+               !!(spi_status & SPI_STATUS_RSVD6),
+               !!(spi_status & SPI_STATUS_RSVD5),
+               !!(spi_status & SPI_STATUS_RSVD4),
+               !!(spi_status & SPI_STATUS_STANDSTILL),
+               !!(spi_status & SPI_STATUS_SG2),
+               !!(spi_status & SPI_STATUS_DRIVER_ERR),
+               !!(spi_status & SPI_STATUS_RESET_FLAG));
+        fflush(stdout);
+        prev_spi_status = spi_status;
     }
 
-    last_bao_value++;
+    last_bao_value++; /* keep your existing counter semantics */
 
-    /* Map GSTAT bits (datasheet): bit0=RESET, bit1=DRV_ERR, bit2=UV_CP */
+    /* GSTAT bits: bit0=RESET, bit1=DRV_ERR, bit2=UV_CP */
     const int reset  = (gstat & 0x01) ? 1 : 0;
     const int drvErr = (gstat & 0x02) ? 1 : 0;
     const int uvCp   = (gstat & 0x04) ? 1 : 0;
 
-    *outT = reset;
-    *outP = drvErr;
-    *outH = uvCp;
+    /* Keep the existing out parameters (labels T/P/H in STATUS_RES) */
+    *last_RESET = reset;        /* T  -> RESET   */
+    *last_DRV_ERR = drvErr;     /* P  -> DRV_ERR */
+    *last_UV_CP = uvCp;         /* H  -> UV_CP   */
 
-    /* Diagnostics (print only when value changes) */
-    if (valid && gstat != prev_gstat) {
+    /* Log GSTAT (only when it changes) */
+    if (gstat != prev_gstat) {
         printf("[DIAG] GSTAT(0x01)=0x%08X  RESET=%d  DRV_ERR=%d  UV_CP=%d\n",
                gstat, reset, drvErr, uvCp);
 
@@ -113,13 +120,13 @@ void decode_tmc5130_readout(unsigned char *raw, int cnt, int *outT, int *outP, i
         }
         if (drvErr) {
             printf("       DRV_ERR set → driver error latched. "
-                   "Inspect DRVSTATUS(0x6F): OT/OTPW/S2GA/S2GB/OLA/OLB. "
-                   "Sticky; clear GSTAT bit with '1'.\n");
+                   "Check DRVSTATUS(0x6F): OT/OTPW/S2GA/S2GB/OLA/OLB. "
+                   "Sticky; clear GSTAT bit by writing '1'.\n");
         }
         if (uvCp) {
-            printf("       UV_CP set → charge pump undervoltage. "
+            printf("       UV_CP set → charge-pump undervoltage. "
                    "Check VM and VCP/Cp capacitors. "
-                   "Sticky; clear GSTAT bit with '1'.\n");
+                   "Sticky; clear GSTAT bit by writing '1'.\n");
         }
         fflush(stdout);
         prev_gstat = gstat;
@@ -403,15 +410,11 @@ int tmc5130init(int bus, int cs)
     return 1; /* success */
 }
 
-/* #define RETRY_INIT */
-
 int main(void) {
-#ifndef  RETRY_INIT
     if (tmc5130init(0, 0) == 0) { /* bus=0, cs=0 → /dev/spidev0.0 */
-        printf("TMC5130 initialized successfully\n");
+        // printf("TMC5130 failed to init.\n");
         // return 0;
     }
-#endif
 
     pthread_t ts_tid, op_tid, ha_tid, bao_tid;
     signal(SIGINT, cleanup_and_exit);
