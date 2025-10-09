@@ -54,31 +54,76 @@ void decode_tmc5130_readout(unsigned char *raw, int cnt, int *outT, int *outP, i
 {
     (void)cnt;
 
+    /* Print only on change to keep logs clean */
+    static uint32_t prev_gstat = 0xFFFFFFFF; /* force one initial print */
+    uint32_t gstat = 0;
+    int valid = 0;
+
+    /* SPI 5B reply: [0]=addr(0x01), [1..4]=data */
     if (raw[0] == TMC5130_GSTAT) {
-        uint32_t gstat = ((uint32_t)raw[1] << 24) |
-                         ((uint32_t)raw[2] << 16) |
-                         ((uint32_t)raw[3] <<  8) |
-                         ((uint32_t)raw[4] <<  0);
-        last_bao_value++;
-        *outT = (gstat & 0x01) ? 1 : 0; /* RESET  */
-        *outP = (gstat & 0x02) ? 1 : 0; /* DRV_ERR*/
-        *outH = (gstat & 0x04) ? 1 : 0; /* UV_CP  */
+        gstat = ((uint32_t)raw[1] << 24) |
+                ((uint32_t)raw[2] << 16) |
+                ((uint32_t)raw[3] <<  8) |
+                ((uint32_t)raw[4] <<  0);
+        valid = 1;
+    }
+    /* UART 8B reply: [0]=0x05, [1]=0xFF, [2]=addr, [3..6]=data, [7]=CRC (not verified here) */
+    else if (raw[0] == 0x05 && (raw[2] & 0x7F) == TMC5130_GSTAT) {
+        gstat = ((uint32_t)raw[3] << 24) |
+                ((uint32_t)raw[4] << 16) |
+                ((uint32_t)raw[5] <<  8) |
+                ((uint32_t)raw[6] <<  0);
+        /* Light sanity checks for visibility (no CRC calc here) */
+        if (raw[1] != 0xFF) {
+            fprintf(stderr, "[GSTAT][UART] WARN: master addr=0x%02X (expected 0xFF)\n", raw[1]);
+        }
+        if ((raw[2] & 0x7F) != TMC5130_GSTAT) {
+            fprintf(stderr, "[GSTAT][UART] WARN: addr echo=0x%02X (expected 0x01)\n", raw[2] & 0x7F);
+        }
+        valid = 1;
+    }
+    else {
+        /* Unexpected payload: neither SPI nor UART GSTAT */
+        fprintf(stderr,
+                "[GSTAT] ERROR: unexpected payload header 0x%02X (expected 0x01 for SPI, or 0x05 for UART)\n",
+                raw[0]);
+        *outT = *outP = *outH = -1;
         return;
     }
 
-    if (raw[0] == 0x05 && (raw[2] & 0x7F) == TMC5130_GSTAT) {
-        uint32_t gstat = ((uint32_t)raw[3] << 24) |
-                         ((uint32_t)raw[4] << 16) |
-                         ((uint32_t)raw[5] <<  8) |
-                         ((uint32_t)raw[6] <<  0);
-        last_bao_value++;
-        *outT = (gstat & 0x01) ? 1 : 0;
-        *outP = (gstat & 0x02) ? 1 : 0;
-        *outH = (gstat & 0x04) ? 1 : 0;
-        return;
-    }
+    last_bao_value++;
 
-    *outT = *outP = *outH = -1;
+    /* Map GSTAT bits (datasheet): bit0=RESET, bit1=DRV_ERR, bit2=UV_CP */
+    const int reset  = (gstat & 0x01) ? 1 : 0;
+    const int drvErr = (gstat & 0x02) ? 1 : 0;
+    const int uvCp   = (gstat & 0x04) ? 1 : 0;
+
+    *outT = reset;
+    *outP = drvErr;
+    *outH = uvCp;
+
+    /* Diagnostics (print only when value changes) */
+    if (valid && gstat != prev_gstat) {
+        printf("[DIAG] GSTAT(0x01)=0x%08X  RESET=%d  DRV_ERR=%d  UV_CP=%d\n",
+               gstat, reset, drvErr, uvCp);
+
+        if (reset) {
+            printf("       RESET set → a reset occurred (power-on/soft). "
+                   "Sticky; clear by writing 0x01 to GSTAT.\n");
+        }
+        if (drvErr) {
+            printf("       DRV_ERR set → driver error latched. "
+                   "Inspect DRVSTATUS(0x6F): OT/OTPW/S2GA/S2GB/OLA/OLB. "
+                   "Sticky; clear GSTAT bit with '1'.\n");
+        }
+        if (uvCp) {
+            printf("       UV_CP set → charge pump undervoltage. "
+                   "Check VM and VCP/Cp capacitors. "
+                   "Sticky; clear GSTAT bit with '1'.\n");
+        }
+        fflush(stdout);
+        prev_gstat = gstat;
+    }
 }
 
 void cleanup_and_exit(int signo) {
