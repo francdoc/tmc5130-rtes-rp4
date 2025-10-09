@@ -15,7 +15,7 @@
 #include <sys/ioctl.h>
 #include <linux/spi/spidev.h>   /* SPI (spidev) */
 
-static int file_i2c = -1;  
+static int file_spi = -1;  
 static uint32_t spi_speed_hz = 1000000; /* 1 MHz */
 static uint8_t  spi_bits      = 8;
 static uint8_t  spi_mode      = SPI_MODE_3; /* TMC5130: mode 3 */
@@ -88,7 +88,7 @@ void cleanup_and_exit(int signo) {
     if (mq_hao_opao != (mqd_t)-1) { mq_close(mq_hao_opao); mq_unlink(Q_HAO_OPAO);}
     if (mq_hao_bao  != (mqd_t)-1) { mq_close(mq_hao_bao);  mq_unlink(Q_HAO_BAO); }
     if (mq_bao_hao  != (mqd_t)-1) { mq_close(mq_bao_hao);  mq_unlink(Q_BAO_HAO); }
-    if (file_i2c >= 0) close(file_i2c);
+    if (file_spi >= 0) close(file_spi);
     printf("\nCleaned up on Ctrl-C\n");
     exit(EXIT_SUCCESS);
 }
@@ -276,8 +276,8 @@ void *bao(void *arg) {
                     continue;
                 }
 
-                if (file_i2c < 0) {
-                    fprintf(stderr, "[BAO]: SPI not initialized (fd=%d)\n", file_i2c);
+                if (file_spi < 0) {
+                    fprintf(stderr, "[BAO]: SPI not initialized (fd=%d)\n", file_spi);
                     continue;
                 }
 
@@ -304,11 +304,11 @@ void *bao(void *arg) {
                 tr2.bits_per_word = spi_bits;
 
                 int ret;
-                ret = ioctl(file_i2c, SPI_IOC_MESSAGE(1), &tr1);
+                ret = ioctl(file_spi, SPI_IOC_MESSAGE(1), &tr1);
                 if (ret < 1) perror("[BAO]: SPI_IOC_MESSAGE tr1");
 
                 /* Allow CS to deassert between frames (separate call) */
-                ret = ioctl(file_i2c, SPI_IOC_MESSAGE(1), &tr2);
+                ret = ioctl(file_spi, SPI_IOC_MESSAGE(1), &tr2);
                 if (ret < 1) perror("[BAO]: SPI_IOC_MESSAGE tr2");
 
                 printf("[BAO]: SPI R %02X -> reply:", addr);
@@ -355,7 +355,7 @@ int tmc5130init(int bus, int cs)
     ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &rd_speed);
     printf("SPI init OK: dev=%s mode=%u bpw=%u speed=%u Hz\n", dev, rd_mode, rd_bits, rd_speed);
 
-    file_i2c = fd;
+    file_spi = fd;
     return 1; /* success */
 }
 
