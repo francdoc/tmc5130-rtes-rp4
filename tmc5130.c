@@ -247,6 +247,7 @@ void *hao(void *arg) {
                 size_t base = strlen(POLL_REQ) + 1;
                 memcpy(msg, POLL_REQ, base); /* includes '\0' */
                 msg[base + 0] = (uint8_t)(TMC5130_GSTAT & 0x7F); /* read address for SPI */
+                printf("[HAO]: Sending address 0x%02X to BAO\n", msg[base + 0]); // Added line
                 printf("[HAO]: sending SPI read request for GSTAT (addr=0x%02X) to BAO\n", msg[base]);
 
                 mq_send(mq_hao_bao, (char*)msg, base + 1, 0);
@@ -320,8 +321,12 @@ void *bao(void *arg) {
                 clock_gettime(CLOCK_MONOTONIC, &now);
                 printf("[BAO]: [%5ld.%09ld] From HAO: %s + payload(%d)\n",
                        now.tv_sec, now.tv_nsec, POLL_REQ, dlen);
-                fflush(stdout);
+                       
+                uint8_t addr = (uint8_t)buf[base] & 0x7F;  /* read address */
+                printf("[BAO]: Received address 0x%02X from HAO\n", addr);
 
+                fflush(stdout);
+                
                 if (dlen < 1) {
                     fprintf(stderr, "[BAO]: no SPI address payload\n");
                     continue;
@@ -332,7 +337,6 @@ void *bao(void *arg) {
                     continue;
                 }
 
-                uint8_t addr = (uint8_t)buf[base] & 0x7F;  /* read address */
                 uint8_t tx1[5] = { addr, 0,0,0,0 };
                 uint8_t tx2[5] = { addr, 0,0,0,0 };
                 uint8_t rx1[5] = { 0 };
