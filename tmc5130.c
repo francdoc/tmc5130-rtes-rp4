@@ -21,14 +21,14 @@ static uint8_t  spi_bits      = 8;
 static uint8_t  spi_mode      = SPI_MODE_3; /* TMC5130: mode 3 */
 
 /* -------- SPI status byte (bits 39..32 of any SPI reply) -------- */
-#define SPI_STATUS_RESET_FLAG   (1u << 0)
-#define SPI_STATUS_DRIVER_ERR   (1u << 1)
-#define SPI_STATUS_SG2          (1u << 2)
-#define SPI_STATUS_STANDSTILL   (1u << 3)
-#define SPI_STATUS_RSVD4        (1u << 4)
-#define SPI_STATUS_RSVD5        (1u << 5)
-#define SPI_STATUS_RSVD6        (1u << 6)
-#define SPI_STATUS_RSVD7        (1u << 7)
+#define SPI_STATUS_STOP_R       (1u << 7) // bit7: status_stop_r
+#define SPI_STATUS_STOP_L       (1u << 6) // bit6: status_stop_l
+#define SPI_STATUS_POS_REACHED  (1u << 5) // bit5: position_reached
+#define SPI_STATUS_VEL_REACHED  (1u << 4) // bit4: velocity_reached
+#define SPI_STATUS_STANDSTILL   (1u << 3) // bit3: standstill
+#define SPI_STATUS_SG2          (1u << 2) // bit2: sg2
+#define SPI_STATUS_DRIVER_ERR   (1u << 1) // bit1: driver_error
+#define SPI_STATUS_RESET_FLAG   (1u << 0) // bit0: reset_flag
 
 /* TMC5130 register address for GSTAT (needed by HAO when building the read) */
 #ifndef TMC5130_GSTAT
@@ -81,18 +81,32 @@ void decode_tmc5130_readout(unsigned char *raw, int cnt, int *last_RESET, int *l
 
     /* Log SPI_STATUS (only when it changes) */
     if (spi_status != prev_spi_status) {
-        printf("[DIAG] SPI_STATUS=0x%02X  "
-               "RSVD7=%d RSVD6=%d RSVD5=%d RSVD4=%d  "
-               "STST=%d SG2=%d DRV_ERR=%d RESET=%d\n",
-               spi_status,
-               !!(spi_status & SPI_STATUS_RSVD7),
-               !!(spi_status & SPI_STATUS_RSVD6),
-               !!(spi_status & SPI_STATUS_RSVD5),
-               !!(spi_status & SPI_STATUS_RSVD4),
-               !!(spi_status & SPI_STATUS_STANDSTILL),
-               !!(spi_status & SPI_STATUS_SG2),
-               !!(spi_status & SPI_STATUS_DRIVER_ERR),
-               !!(spi_status & SPI_STATUS_RESET_FLAG));
+        printf("[DIAG] SPI_STATUS=0x%02X  ", spi_status);
+        if (spi_status & SPI_STATUS_STOP_R){
+            printf("STOP_R ");
+        }
+        if (spi_status & SPI_STATUS_STOP_L){
+            printf("STOP_L ");
+        }
+        if (spi_status & SPI_STATUS_POS_REACHED){       
+            printf("POS_REACHED ");
+        }
+        if (spi_status & SPI_STATUS_VEL_REACHED){
+            printf("VEL_REACHED ");
+        }
+        if (spi_status & SPI_STATUS_STANDSTILL){
+            printf("STANDSTILL ");
+        }
+        if (spi_status & SPI_STATUS_SG2){
+            printf("SG2 ");
+        }
+        if (spi_status & SPI_STATUS_DRIVER_ERR){
+            printf("DRIVER_ERR ");
+        }
+        if (spi_status & SPI_STATUS_RESET_FLAG){
+            printf("RESET_FLAG ");
+        }
+        printf("\n");
         fflush(stdout);
         prev_spi_status = spi_status;
     }
