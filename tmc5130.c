@@ -70,12 +70,11 @@ void decode_tmc5130_readout(unsigned char *raw, int cnt, int *last_RESET, int *l
     static uint8_t  prev_spi_status = 0xFF;       /* force first print */
     static uint32_t prev_gstat      = 0xFFFFFFFF; /* force first print */
 
-    const uint8_t spi_status = raw[0]; // NOTE: SPI status byte, bits 39-32 of any SPI reply (RPi is by default little-endian). 
-
-    // NOTE: raw[1..4] is GSTAT, bits 31-0. Both status and GSTAT are constructed as MSB bytes first in the datasheet.
+    const uint8_t spi_status = raw[0]; // bits 39-32 of any SPI reply (RPi is by default little-endian). 
 
     /* 32‑bit GSTAT value is big‑endian in bytes 1..4 */
-    const uint32_t gstat =
+    // bits 31-0 (raw[1..4]) is GSTAT,  Both status and GSTAT are constructed as MSB bytes first in the datasheet.
+    const uint32_t gstat =  
         ((uint32_t)raw[1] << 24) |
         ((uint32_t)raw[2] << 16) |
         ((uint32_t)raw[3] <<  8) |
