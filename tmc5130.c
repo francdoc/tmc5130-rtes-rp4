@@ -6,19 +6,19 @@
 #include <pthread.h>
 #include <mqueue.h>
 #include <errno.h>
-#include <time.h>        /* for clock_gettime */
-#include <signal.h>      /* for signal handling */
-#include <sys/poll.h>    /* for poll() */
-#include <fcntl.h>       /* for open() */
+#include <time.h>      
+#include <signal.h>    
+#include <sys/poll.h>   
+#include <fcntl.h>     
 
 #include <stdint.h>
 #include <sys/ioctl.h>
-#include <linux/spi/spidev.h>   /* SPI (spidev) */
+#include <linux/spi/spidev.h> 
 
 static int file_spi = -1;  
-static uint32_t spi_speed_hz = 1000000; /* 1 MHz */
+static uint32_t spi_speed_hz = 1000000;
 static uint8_t  spi_bits      = 8;
-static uint8_t  spi_mode      = SPI_MODE_3; /* TMC5130: mode 3 */
+static uint8_t  spi_mode      = SPI_MODE_3;
 
 /* -------- SPI status byte (bits 39..32 of any SPI reply) -------- */
 #define SPI_STATUS_STOP_R       (1u << 7) // bit7: status_stop_r, most significant bit (MSB)
@@ -64,11 +64,11 @@ static int last_bao_value  = 0;
 
 void decode_tmc5130_readout(unsigned char *raw, int cnt, int *last_RESET, int *last_DRV_ERR, int *last_UV_CP)
 {
-    (void)cnt; /* BAO counter, not a length */
+    (void)cnt;
 
-    /* Expect exactly 5 SPI bytes: [0]=SPI_STATUS, [1..4]=GSTAT */
-    static uint8_t  prev_spi_status = 0xFF;       /* force first print */
-    static uint32_t prev_gstat      = 0xFFFFFFFF; /* force first print */
+    /* Expect 5 SPI bytes: [0]=SPI_STATUS, [1..4]=GSTAT */
+    static uint8_t  prev_spi_status = 0xFF;     
+    static uint32_t prev_gstat      = 0xFFFFFFFF;
 
     const uint8_t spi_status = raw[0]; // bits 39-32 of any SPI reply (RPi is by default little-endian). 
 
@@ -112,34 +112,33 @@ void decode_tmc5130_readout(unsigned char *raw, int cnt, int *last_RESET, int *l
         prev_spi_status = spi_status;
     }
 
-    last_bao_value++; /* keep your existing counter semantics */
+    last_bao_value++;
 
     /* GSTAT bits: bit0=RESET, bit1=DRV_ERR, bit2=UV_CP */
     const int reset  = (gstat & 0x01) ? 1 : 0;
     const int drvErr = (gstat & 0x02) ? 1 : 0;
     const int uvCp   = (gstat & 0x04) ? 1 : 0;
 
-    /* Keep the existing out parameters (labels T/P/H in STATUS_RES) */
-    *last_RESET = reset;        /* T  -> RESET   */
-    *last_DRV_ERR = drvErr;     /* P  -> DRV_ERR */
-    *last_UV_CP = uvCp;         /* H  -> UV_CP   */
+    *last_RESET = reset;      
+    *last_DRV_ERR = drvErr;  
+    *last_UV_CP = uvCp;      
 
-    /* Log GSTAT (only when it changes) */
+    /* Log GSTAT only when it changes */
     if (gstat != prev_gstat) {
         printf("[DIAG] GSTAT(0x01)=0x%08X  RESET=%d  DRV_ERR=%d  UV_CP=%d\n",
                gstat, reset, drvErr, uvCp);
 
         if (reset) {
-            printf("       RESET set → a reset occurred (power-on/soft). "
+            printf("       RESET set -> a reset occurred (power-on/soft). "
                    "Sticky; clear by writing 0x01 to GSTAT.\n");
         }
         if (drvErr) {
-            printf("       DRV_ERR set → driver error latched. "
+            printf("       DRV_ERR set -> driver error latched. "
                    "Check DRVSTATUS(0x6F): OT/OTPW/S2GA/S2GB/OLA/OLB. "
                    "Sticky; clear GSTAT bit by writing '1'.\n");
         }
         if (uvCp) {
-            printf("       UV_CP set → charge-pump undervoltage. "
+            printf("       UV_CP set -> charge-pump undervoltage. "
                    "Check VM and VCP/Cp capacitors. "
                    "Sticky; clear GSTAT bit by writing '1'.\n");
         }
@@ -188,7 +187,7 @@ void *time_sequencer(void *arg) {
     return NULL;
 }
 
-/* OPAO: unchanged behavior */
+/* OPAO: requests status to HAO and prints result. */
 void *opao(void *arg) {
     (void)arg;
     char buf[MSG_SIZE];
@@ -205,7 +204,7 @@ void *opao(void *arg) {
 
         if (pfds[0].revents & POLLIN) {
             len = mq_receive(mq_ts_opao, buf, MSG_SIZE, NULL);
-            if (len == -1) { perror("[OPAO]: mq_receive TS→OPAO"); break; }
+            if (len == -1) { perror("[OPAO]: mq_receive TS->OPAO"); break; }
 
             if (strcmp(buf, STATUS_REQ) == 0) {
                 clock_gettime(CLOCK_MONOTONIC, &now);
@@ -217,7 +216,7 @@ void *opao(void *arg) {
 
         if (pfds[1].revents & POLLIN) {
             len = mq_receive(mq_hao_opao, buf, MSG_SIZE, NULL);
-            if (len == -1) { perror("[OPAO]: mq_receive HAO→OPAO"); break; }
+            if (len == -1) { perror("[OPAO]: mq_receive HAO->OPAO"); break; }
 
             if (strncmp(buf, STATUS_RES ":", strlen(STATUS_RES)+1) == 0) {
                 clock_gettime(CLOCK_MONOTONIC, &now);
@@ -230,7 +229,6 @@ void *opao(void *arg) {
     return NULL;
 }
 
-/* HAO: build "POLL_REQ\0 + 1-byte address (0x01)" for GSTAT over SPI */
 void *hao(void *arg) {
     (void)arg;
     char buf[MSG_SIZE + 8];
@@ -248,10 +246,10 @@ void *hao(void *arg) {
     while (1) {
         if (poll(pfds, 3, -1) == -1) { perror("[HAO]: poll"); break; }
 
-        /* TS → HAO: POLL_REQ */
+        /* TS -> HAO: POLL_REQ */
         if (pfds[0].revents & POLLIN) {
             len = mq_receive(mq_ts_hao, buf, MSG_SIZE, NULL);
-            if (len == -1) { perror("[HAO]: mq_receive TS→HAO"); break; }
+            if (len == -1) { perror("[HAO]: mq_receive TS->HAO"); break; }
 
             if (strcmp(buf, POLL_REQ) == 0) {
                 clock_gettime(CLOCK_MONOTONIC, &now);
@@ -261,18 +259,18 @@ void *hao(void *arg) {
                 unsigned char msg[MSG_SIZE];
                 size_t base = strlen(POLL_REQ) + 1;
                 memcpy(msg, POLL_REQ, base); /* includes '\0' */
-                msg[base + 0] = (uint8_t)(TMC5130_GSTAT & 0x7F); /* read address for SPI */
-                printf("[HAO]: Sending address 0x%02X to BAO\n", msg[base + 0]); // Added line
+                msg[base + 0] = (uint8_t)(TMC5130_GSTAT & 0x7F); /* TMC5130 register address to be read via SPI*/
+                printf("[HAO]: Sending address 0x%02X to BAO\n", msg[base + 0]);
                 printf("[HAO]: sending SPI read request for GSTAT (addr=0x%02X) to BAO\n", msg[base]);
 
                 mq_send(mq_hao_bao, (char*)msg, base + 1, 0);
             }
         }
 
-        /* OPAO → HAO: STATUS_REQ */
+        /* OPAO -> HAO: STATUS_REQ, which implies an immediate response to OPAO with HAO status data. */
         if (pfds[1].revents & POLLIN) {
             len = mq_receive(mq_opao_hao, buf, MSG_SIZE, NULL);
-            if (len == -1) { perror("[HAO]: mq_receive OPAO→HAO"); break; }
+            if (len == -1) { perror("[HAO]: mq_receive OPAO->HAO"); break; }
 
             if (strcmp(buf, STATUS_REQ) == 0) {
                 clock_gettime(CLOCK_MONOTONIC, &now);
@@ -280,19 +278,19 @@ void *hao(void *arg) {
                 fflush(stdout);
                 char resp[MSG_SIZE];
                 snprintf(resp, MSG_SIZE, STATUS_RES ":%d T=%d P=%d H=%d",
-                    last_bao_value, last_RESET, last_DRV_ERR, last_UV_CP); // keep API labels
+                    last_bao_value, last_RESET, last_DRV_ERR, last_UV_CP);
                 mq_send(mq_hao_opao, resp, strlen(resp)+1, 0);
             }
         }
 
-        /* BAO → HAO: POLL_RES:<n>\0 + 5 raw SPI bytes */
+        /* BAO -> HAO: POLL_RES:<n>\0 + 5 raw SPI bytes */
         if (pfds[2].revents & POLLIN) {
             len = mq_receive(mq_bao_hao, buf, MSG_SIZE+8, NULL);
-            if (len == -1) { perror("[HAO]: mq_receive BAO→HAO"); break; }
+            if (len == -1) { perror("[HAO]: mq_receive BAO->HAO"); break; }
             
             if (strncmp(buf, POLL_RES ":", strlen(POLL_RES) + 1) == 0) {
                 int got = len;
-                fprintf(stderr, "[HAO]: Received from BAO → ");
+                fprintf(stderr, "[HAO]: Received from BAO -> ");
                 for (int i = 0; i < got; i++) fprintf(stderr, "%02X ", (unsigned char)buf[i]);
                 fprintf(stderr, "\n");
 
@@ -327,7 +325,7 @@ void *bao(void *arg) {
 
         if (p_fb.revents & POLLIN) {
             len = mq_receive(mq_hao_bao, buf, MSG_SIZE+8, NULL);
-            if (len == -1) { perror("[BAO]: mq_receive HAO→BAO"); break; }
+            if (len == -1) { perror("[BAO]: mq_receive HAO->BAO"); break; }
 
             if (memcmp(buf, POLL_REQ, strlen(POLL_REQ)+1) == 0) {
                 size_t base = strlen(POLL_REQ) + 1;
@@ -337,7 +335,7 @@ void *bao(void *arg) {
                 printf("[BAO]: [%5ld.%09ld] From HAO: %s + payload(%d)\n",
                        now.tv_sec, now.tv_nsec, POLL_REQ, dlen);
                        
-                uint8_t addr = (uint8_t)buf[base] & 0x7F;  /* read address */
+                uint8_t addr = (uint8_t)buf[base] & 0x7F;
                 printf("[BAO]: Received address 0x%02X from HAO\n", addr);
 
                 fflush(stdout);
@@ -377,7 +375,7 @@ void *bao(void *arg) {
                 ret = ioctl(file_spi, SPI_IOC_MESSAGE(1), &tr1);
                 if (ret < 1) perror("[BAO]: SPI_IOC_MESSAGE tr1");
 
-                /* Allow CS to deassert between frames (separate call) */
+                /* Allow CS to deassert between frames */
                 ret = ioctl(file_spi, SPI_IOC_MESSAGE(1), &tr2);
                 if (ret < 1) perror("[BAO]: SPI_IOC_MESSAGE tr2");
 
@@ -392,7 +390,7 @@ void *bao(void *arg) {
                 memcpy(msg, hdr, hlen);
                 memcpy(msg + hlen, rx2, 5);
 
-                fprintf(stderr, "[BAO]: Sending to HAO → ");
+                fprintf(stderr, "[BAO]: Sending to HAO -> ");
                 for (int i = 0; i < hlen + 5; i++) fprintf(stderr, "%02X ", ((unsigned char*)msg)[i]);
                 fprintf(stderr, "\n");
 
@@ -411,7 +409,7 @@ int tmc5130init(int bus, int cs)
     int fd = open(dev, O_RDWR);
     if (fd < 0) {
         perror("tmc5130init: open spidev");
-        return 0; /* keep your main() behavior (we'll avoid early exit by returning 1 on success) */
+        return 0;
     }
 
     /* Configure SPI mode, bpw, speed */
@@ -426,11 +424,11 @@ int tmc5130init(int bus, int cs)
     printf("SPI init OK: dev=%s mode=%u bpw=%u speed=%u Hz\n", dev, rd_mode, rd_bits, rd_speed);
 
     file_spi = fd;
-    return 1; /* success */
+    return 1; 
 }
 
 int main(void) {
-    if (tmc5130init(0, 0) == 0) { /* bus=0, cs=0 → /dev/spidev0.0 */
+    if (tmc5130init(0, 0) == 0) { /* bus=0, cs=0 -> /dev/spidev0.0 */
         // printf("TMC5130 failed to init.\n");
         // return 0;
     }
