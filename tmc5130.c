@@ -21,14 +21,14 @@ static uint8_t  spi_bits      = 8;
 static uint8_t  spi_mode      = SPI_MODE_3; /* TMC5130: mode 3 */
 
 /* -------- SPI status byte (bits 39..32 of any SPI reply) -------- */
-#define SPI_STATUS_STOP_R       (1u << 7) // bit7: status_stop_r
+#define SPI_STATUS_STOP_R       (1u << 7) // bit7: status_stop_r, most significant bit (MSB)
 #define SPI_STATUS_STOP_L       (1u << 6) // bit6: status_stop_l
 #define SPI_STATUS_POS_REACHED  (1u << 5) // bit5: position_reached
 #define SPI_STATUS_VEL_REACHED  (1u << 4) // bit4: velocity_reached
 #define SPI_STATUS_STANDSTILL   (1u << 3) // bit3: standstill
 #define SPI_STATUS_SG2          (1u << 2) // bit2: sg2
 #define SPI_STATUS_DRIVER_ERR   (1u << 1) // bit1: driver_error
-#define SPI_STATUS_RESET_FLAG   (1u << 0) // bit0: reset_flag
+#define SPI_STATUS_RESET_FLAG   (1u << 0) // bit0: reset_flag, least significant bit (LSB)
 
 /* TMC5130 register address for GSTAT (needed by HAO when building the read) */
 #ifndef TMC5130_GSTAT
